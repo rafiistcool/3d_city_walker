@@ -70,7 +70,7 @@ export class BasicWorld {
     private textureLoader: THREE.TextureLoader;
     private cubeTextureLoader: THREE.CubeTextureLoader;
     private groundTexture!: THREE.Texture;
-    private buildingTexture!: THREE.Texture;
+    private buildingTextures: THREE.Texture[] = [];
     private streetTexture!: THREE.Texture;
     private environmentMap!: THREE.CubeTexture;
     private dayEnvironmentMap!: THREE.CubeTexture;
@@ -161,9 +161,17 @@ export class BasicWorld {
         this.groundTexture.wrapS = this.groundTexture.wrapT = THREE.RepeatWrapping;
         this.groundTexture.repeat.set(100, 100);
 
-        const brickUrl = 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1024';
-        this.buildingTexture = this.textureLoader.load(brickUrl);
-        this.buildingTexture.wrapS = this.buildingTexture.wrapT = THREE.RepeatWrapping;
+        const buildingUrls = [
+            'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1024',
+            'https://images.unsplash.com/photo-1501594907352-04cda38ebc29?w=1024',
+            'https://images.unsplash.com/photo-1542773668-6bbc214305aa?w=1024',
+            'https://images.unsplash.com/photo-1580584123243-4c3fdab9c2b0?w=1024'
+        ];
+        this.buildingTextures = buildingUrls.map(url => {
+            const tex = this.textureLoader.load(url);
+            tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+            return tex;
+        });
 
         const streetUrl = 'https://images.unsplash.com/photo-1506748686214-e9df14d4d9d0?w=1024';
         this.streetTexture = this.textureLoader.load(streetUrl);
@@ -192,17 +200,14 @@ export class BasicWorld {
     }
 
     private initMaterials(): void {
-        this.buildingMaterials = [
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x8c8c8c, roughness: 0.5, metalness: 0.4 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x5c5c5c, roughness: 0.4, metalness: 0.6 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0xcc6666, roughness: 0.7, metalness: 0.3 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0xa08d77, roughness: 0.6, metalness: 0.4 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x778899, roughness: 0.3, metalness: 0.8 }),
-        ];
+        this.buildingMaterials = this.buildingTextures.map(tex =>
+            new THREE.MeshStandardMaterial({ map: tex, envMap: this.environmentMap, roughness: 0.6, metalness: 0.4 })
+        );
         this.streetMaterial = new THREE.MeshStandardMaterial({ map: this.streetTexture, roughness: 0.9, metalness: 0.2, side: THREE.DoubleSide });
         this.lanternPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x454545, roughness: 0.5, metalness: 0.8 });
         this.lanternLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffee, emissive: new THREE.Color(0xffffaa), emissiveIntensity: 1 });
-        this.carBodyMaterial = new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xff0000, roughness: 0.1, metalness: 1.0, envMap: this.environmentMap });
+        const carTex = this.buildingTextures[0];
+        this.carBodyMaterial = new THREE.MeshStandardMaterial({ map: carTex, color: 0xff0000, roughness: 0.1, metalness: 1.0, envMap: this.environmentMap });
         this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7, metalness: 0.3, envMap: this.environmentMap });
     }
 
