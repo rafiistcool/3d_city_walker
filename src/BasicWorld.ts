@@ -160,6 +160,30 @@ declare global {
     // Constants accessed as properties of THREE
     const PCFSoftShadowMap: number;
     const DoubleSide: number;
+    const RepeatWrapping: number;
+    const ACESFilmicToneMapping: number;
+    const sRGBEncoding: number;
+    class Texture {
+      wrapS: number; wrapT: number;
+      repeat: { set(x:number, y:number): void };
+    }
+    class CubeTexture extends Texture {}
+    class TextureLoader {
+      load(path: string): Texture;
+      setPath(path: string): this;
+      setCrossOrigin(origin: string): this;
+    }
+    class CubeTextureLoader {
+      load(paths: string[]): CubeTexture;
+      setPath(path: string): this;
+      setCrossOrigin(origin: string): this;
+    }
+    class Box3 {
+      min: Vector3; max: Vector3;
+      constructor(min?: Vector3, max?: Vector3);
+      set(min: Vector3, max: Vector3): this;
+      containsPoint(point: Vector3): boolean;
+    }
   }
 }
 
@@ -224,12 +248,37 @@ export class BasicWorld {
     private carBodyMaterial: THREE.MeshStandardMaterial;
     private wheelMaterial: THREE.MeshStandardMaterial;
 
+    // Textures and environment
+    private textureLoader: THREE.TextureLoader;
+    private cubeTextureLoader: THREE.CubeTextureLoader;
+    private groundTexture: THREE.Texture;
+    private buildingTexture: THREE.Texture;
+    private environmentMap: THREE.CubeTexture;
+
+    // Collision and world chunks
+    private buildingColliders: THREE.Box3[] = [];
+    private generatedChunks: Set<string> = new Set();
+    private activeChunks: Map<string, THREE.Group> = new Map();
+    private chunkSize: number;
+
+    private collides(pos: THREE.Vector3): boolean {
+        for (const box of this.buildingColliders) {
+            if (box.containsPoint(pos)) return true;
+        }
+        return false;
+    }
+
 
     constructor() {
         this.cameraTargetOffset = new THREE.Vector3(0, this.characterHeight * 0.8, 0);
         this.cityOffset = (this.citySize * (this.blockSize + this.streetWidth) - this.streetWidth) / 2;
+        this.chunkSize = this.citySize * (this.blockSize + this.streetWidth);
+
+        this.textureLoader = new THREE.TextureLoader();
+        this.cubeTextureLoader = new THREE.CubeTextureLoader();
 
         this.init();
+        this.loadTextures();
         this.initMaterials();
         this.createCharacter(); // Character position will be set based on car's calculated street spawn
         this.createCar();       // Car will be placed on a calculated street position
@@ -252,6 +301,9 @@ export class BasicWorld {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+        this.renderer.physicallyCorrectLights = true;
+        this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        (this.renderer as any).outputEncoding = THREE.sRGBEncoding;
 
         this.clock = new THREE.Clock();
 
@@ -268,19 +320,43 @@ export class BasicWorld {
         window.addEventListener('resize', this.onWindowResize.bind(this), false);
     }
 
+    private loadTextures(): void {
+        this.textureLoader.setCrossOrigin('anonymous');
+        this.cubeTextureLoader.setCrossOrigin('anonymous');
+
+        const gridUrl = 'https://threejs.org/examples/textures/uv_grid_opengl.jpg';
+        this.groundTexture = this.textureLoader.load(gridUrl);
+        this.groundTexture.wrapS = this.groundTexture.wrapT = THREE.RepeatWrapping;
+        this.groundTexture.repeat.set(50, 50);
+
+        this.buildingTexture = this.textureLoader.load(gridUrl);
+        this.buildingTexture.wrapS = this.buildingTexture.wrapT = THREE.RepeatWrapping;
+
+        this.environmentMap = this.cubeTextureLoader.load([
+            'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
+            'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
+            'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
+            'https://threejs.org/examples/textures/cube/Bridge2/negy.jpg',
+            'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
+            'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg'
+        ]);
+        this.scene.environment = this.environmentMap;
+        this.scene.background = this.environmentMap;
+    }
+
     private initMaterials(): void {
         this.buildingMaterials = [
-            new THREE.MeshStandardMaterial({ color: 0x8c8c8c, roughness: 0.8, metalness: 0.2 }),
-            new THREE.MeshStandardMaterial({ color: 0x5c5c5c, roughness: 0.7, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ color: 0xcc6666, roughness: 0.9, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ color: 0xa08d77, roughness: 0.8, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ color: 0x778899, roughness: 0.6, metalness: 0.3 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x8c8c8c, roughness: 0.8, metalness: 0.2 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x5c5c5c, roughness: 0.7, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xcc6666, roughness: 0.9, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xa08d77, roughness: 0.8, metalness: 0.1 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x778899, roughness: 0.6, metalness: 0.3 }),
         ];
         this.streetMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide });
         this.lanternPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x454545, roughness: 0.5, metalness: 0.8 });
         this.lanternLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffee, emissive: new THREE.Color(0xffffaa), emissiveIntensity: 1 });
         this.characterMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.5, metalness: 0.1 });
-        this.carBodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.3, metalness: 0.6 });
+        this.carBodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.3, metalness: 0.6, envMap: this.environmentMap });
         this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8, metalness: 0.1 });
     }
 
@@ -381,7 +457,7 @@ export class BasicWorld {
 
     private createObjects(): void {
         const groundGeometry = new THREE.PlaneGeometry(300, 300);
-        const groundMaterial = new THREE.MeshStandardMaterial({ color: 0x504030, side: THREE.DoubleSide });
+        const groundMaterial = new THREE.MeshStandardMaterial({ map: this.groundTexture, side: THREE.DoubleSide });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
         ground.position.y = -0.05; // Slightly below streets
@@ -448,6 +524,11 @@ export class BasicWorld {
                     building.position.set(buildingX, height / 2, buildingZ);
                     building.castShadow = true;
                     building.receiveShadow = true;
+                    const collider = new THREE.Box3().set(
+                        new THREE.Vector3(buildingX - width/2, 0, buildingZ - depth/2),
+                        new THREE.Vector3(buildingX + width/2, height, buildingZ + depth/2)
+                    );
+                    this.buildingColliders.push(collider);
                     this.scene.add(building);
                 }
             }
@@ -519,6 +600,7 @@ export class BasicWorld {
             this.updateCharacterMovement(deltaTime);
         }
         this.updateCameraOrbit();
+        this.wrapWorld();
     }
 
     private updateCharacterMovement(deltaTime: number): void {
@@ -535,7 +617,10 @@ export class BasicWorld {
 
         if (didMove) {
             movementDirection.normalize().multiplyScalar(moveDistance);
-            this.character.position.add(movementDirection);
+            const candidate = this.character.position.clone().add(movementDirection);
+            if (!this.collides(candidate)) {
+                this.character.position.copy(candidate);
+            }
             // Character rotation
             const targetAngle = Math.atan2(movementDirection.x, movementDirection.z);
             let angleDiff = targetAngle - this.character.rotation.y;
@@ -597,7 +682,12 @@ export class BasicWorld {
 
         // Move car forward/backward
         const forwardVector = new THREE.Vector3(0, 0, 1).applyQuaternion(this.carModel.quaternion);
-        this.carModel.position.add(forwardVector.multiplyScalar(this.carSpeed * deltaTime));
+        const candidate = this.carModel.position.clone().add(forwardVector.clone().multiplyScalar(this.carSpeed * deltaTime));
+        if (!this.collides(candidate)) {
+            this.carModel.position.copy(candidate);
+        } else {
+            this.carSpeed = 0;
+        }
 
         // Keep car on ground (simple approach)
         this.carModel.position.y = 0; // Assuming ground is at Y=0 for the car's base
@@ -637,6 +727,33 @@ export class BasicWorld {
         this.camera.aspect = window.innerWidth / window.innerHeight;
         this.camera.updateProjectionMatrix();
         this.renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    private wrapWorld(): void {
+        const target = this.cameraTarget || this.character;
+        const max = this.chunkSize / 2;
+        let offsetX = 0;
+        let offsetZ = 0;
+        if (target.position.x > max) offsetX = -this.chunkSize;
+        if (target.position.x < -max) offsetX = this.chunkSize;
+        if (target.position.z > max) offsetZ = -this.chunkSize;
+        if (target.position.z < -max) offsetZ = this.chunkSize;
+        if (offsetX !== 0 || offsetZ !== 0) {
+            this.character.position.x += offsetX;
+            this.character.position.z += offsetZ;
+            this.carModel.position.x += offsetX;
+            this.carModel.position.z += offsetZ;
+            this.scene.children.forEach(obj => {
+                if (obj !== this.camera && obj !== this.character && obj !== this.carModel) {
+                    obj.position.x += offsetX;
+                    obj.position.z += offsetZ;
+                }
+            });
+            this.buildingColliders.forEach(b => {
+                b.min.x += offsetX; b.max.x += offsetX;
+                b.min.z += offsetZ; b.max.z += offsetZ;
+            });
+        }
     }
 
     private animate(): void {
