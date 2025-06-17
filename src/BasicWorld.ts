@@ -192,10 +192,35 @@ export class BasicWorld {
     private camera: THREE.PerspectiveCamera;
     private renderer: THREE.WebGLRenderer;
     private clock: THREE.Clock;
+    private audioListener: THREE.AudioListener;
+    private soundEffects: Map<string, THREE.Audio>;
+    private audioLoader: THREE.AudioLoader;
+
+    // Day/Night Cycle
+    private cycleDurationSeconds: number = 120; // Full cycle in seconds
+    private currentTimeOfDaySeconds: number = 0; // Current time in the cycle
+    private sunMoonLight: THREE.DirectionalLight;
+    private ambientLight: THREE.AmbientLight; // To control ambient light during cycle
+    private streetLights: THREE.PointLight[] = [];
+
+    // Coin Properties
+    private coins: THREE.Group[] = []; // Using Group to potentially hold more complex coin models later
+    private numCoinsToSpawn: number = 20;
+    private coinRadius: number = 0.5;
+    private coinHeight: number = 0.1;
+    private coinCollectionDistance: number = 2.0; // Increased slightly for easier collection
+    private collectedCoinsCount: number = 0;
+    private coinMaterial: THREE.MeshStandardMaterial;
+    private respawnAllCoinsTimeout: any = null; // NodeJS.Timeout or number depending on environment
+    private readonly COIN_RESPAWN_DELAY_MS: number = 30000; // 30 seconds
 
     // Player and Character
     private character: THREE.Group;
     private cameraTarget: THREE.Object3D;
+
+    // Sound timers/state
+    private footstepTimer: number = 0;
+    private readonly footstepInterval: number = 0.4; // seconds
 
     private moveSpeed: number = 4;
     private mouseSensitivity: number = 0.002;
@@ -235,7 +260,7 @@ export class BasicWorld {
     // City Layout Parameters
     private readonly blockSize: number = 20;
     private readonly streetWidth: number = 6;
-    private readonly citySize: number = 5; // Number of blocks in one dimension
+    private readonly citySize: number = 10; // Number of blocks in one dimension
     private cityOffset: number = 0;
 
 
@@ -276,16 +301,21 @@ export class BasicWorld {
 
         this.textureLoader = new THREE.TextureLoader();
         this.cubeTextureLoader = new THREE.CubeTextureLoader();
+        this.audioLoader = new THREE.AudioLoader(); // Initialize AudioLoader
+        this.soundEffects = new Map<string, THREE.Audio>(); // Initialize soundEffects Map
 
         this.init();
+        this.loadSoundAssets(); // New method to group sound loading
         this.loadTextures();
         this.initMaterials();
         this.createCharacter(); // Character position will be set based on car's calculated street spawn
         this.createCar();       // Car will be placed on a calculated street position
         this.cameraTarget = this.character; // Set initial target
         this.createObjects();
+        this.createAndPlaceCoins(); // Create coins after other objects
         this.setupControls();
         this.updateCameraOrbit(); // Initial camera position
+        this.updateCoinUI(); // Initial UI update
         this.animate();
     }
 
@@ -295,6 +325,9 @@ export class BasicWorld {
         this.scene.fog = new THREE.Fog(this.scene.background as THREE.Color, 50, 200);
 
         this.camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 300);
+        // Audio Listener
+        this.audioListener = new THREE.AudioListener();
+        this.camera.add(this.audioListener);
 
         const canvas = document.getElementById('webglCanvas') as HTMLCanvasElement;
         this.renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
@@ -307,17 +340,48 @@ export class BasicWorld {
 
         this.clock = new THREE.Clock();
 
-        const ambientLight = new THREE.AmbientLight(0x404060, 0.8);
-        this.scene.add(ambientLight); 
+        // Store ambient light for cycle control
+        this.ambientLight = new THREE.AmbientLight(0x404060, 0.8); // Initial day values
+        this.scene.add(this.ambientLight);
 
-        const moonLight = new THREE.DirectionalLight(0xa0a0c0, 0.6);
-        moonLight.position.set(30, 50, 20);
-        moonLight.castShadow = true;
-        moonLight.shadow.mapSize.width = 2048;
-        moonLight.shadow.mapSize.height = 2048;
-        this.scene.add(moonLight);
+        this.sunMoonLight = new THREE.DirectionalLight(0xffddaa, 1.0); // Initial day values
+        this.sunMoonLight.position.set(30, 50, 20); // Initial position (will be updated)
+        this.sunMoonLight.castShadow = true;
+        this.sunMoonLight.shadow.mapSize.width = 2048;
+        this.sunMoonLight.shadow.mapSize.height = 2048;
+        this.scene.add(this.sunMoonLight);
+        // Ensure sunMoonLight targets the center of the scene
+        this.sunMoonLight.target.position.set(0,0,0);
+        this.scene.add(this.sunMoonLight.target);
+
+
+        // Initialize Day/Night Cycle
+        this.currentTimeOfDaySeconds = this.cycleDurationSeconds / 4; // Start at midday-ish
+        this.streetLights = [];
+
 
         window.addEventListener('resize', this.onWindowResize.bind(this), false);
+    }
+
+    private loadSound(name: string, path: string, loop: boolean = false, volume: number = 0.5): void {
+        this.audioLoader.load(path, (buffer) => {
+            const sound = new THREE.Audio(this.audioListener);
+            sound.setBuffer(buffer);
+            sound.setLoop(loop);
+            sound.setVolume(volume);
+            this.soundEffects.set(name, sound);
+            // console.log(`Sound loaded: ${name}`);
+        },
+        (xhr) => { /* console.log((xhr.loaded / xhr.total * 100) + '% loaded for ' + name); */ },
+        (err) => { console.error(`Error loading sound ${name}:`, err); }
+        );
+    }
+
+    private loadSoundAssets(): void {
+        this.loadSound('footstep', 'assets/sounds/footstep.wav', false, 0.3);
+        this.loadSound('jump', 'assets/sounds/jump.wav', false, 0.5);
+        this.loadSound('coin', 'assets/sounds/coin.wav', false, 0.7);
+        this.loadSound('engine', 'assets/sounds/engine_loop.wav', true, 0.2);
     }
 
     private loadTextures(): void {
@@ -358,6 +422,73 @@ export class BasicWorld {
         this.characterMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.5, metalness: 0.1 });
         this.carBodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.3, metalness: 0.6, envMap: this.environmentMap });
         this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8, metalness: 0.1 });
+        this.coinMaterial = new THREE.MeshStandardMaterial({
+            color: 0xffd700, // Gold
+            emissive: new THREE.Color(0xccaa00),
+            emissiveIntensity: 0.5,
+            metalness: 0.8,
+            roughness: 0.4
+        });
+    }
+
+    private updateCoinUI(): void {
+        const coinUIElement = document.getElementById('coin-ui');
+        if (coinUIElement) {
+            coinUIElement.textContent = `Coins: ${this.collectedCoinsCount}`;
+        }
+    }
+
+    private createAndPlaceCoins(): void {
+        const coinGeo = new THREE.CylinderGeometry(this.coinRadius, this.coinRadius, this.coinHeight, 16);
+
+        for (let i = 0; i < this.numCoinsToSpawn; i++) {
+            const coin = new THREE.Mesh(coinGeo, this.coinMaterial.clone()); // Clone material for potential individual modifications later
+            coin.castShadow = true;
+            coin.receiveShadow = true; // Coins should also receive shadows
+
+            let placed = false;
+            let attempts = 0;
+            while (!placed && attempts < 20) { // Try a few times to find a spot
+                attempts++;
+                const randomI = Math.floor(Math.random() * this.citySize);
+                const randomJ = Math.floor(Math.random() * this.citySize);
+
+                let potentialX = 0;
+                let potentialZ = 0;
+                const sidewalkOffset = this.streetWidth / 2 + this.coinRadius + 0.5; // Place it just off the street
+
+                // Randomly choose to place near a horizontal or vertical street segment
+                if (Math.random() < 0.5) { // Near a horizontal street
+                    potentialX = randomI * (this.blockSize + this.streetWidth) - this.cityOffset + Math.random() * this.blockSize;
+                    potentialZ = randomJ * (this.blockSize + this.streetWidth) - this.cityOffset - sidewalkOffset * (Math.random() < 0.5 ? 1 : -1);
+                } else { // Near a vertical street
+                    potentialX = randomI * (this.blockSize + this.streetWidth) - this.cityOffset - sidewalkOffset * (Math.random() < 0.5 ? 1 : -1);
+                    potentialZ = randomJ * (this.blockSize + this.streetWidth) - this.cityOffset + Math.random() * this.blockSize;
+                }
+
+                const coinPosition = new THREE.Vector3(potentialX, this.coinHeight / 2 + 0.1, potentialZ);
+
+                // Basic check: ensure not under the car's initial spawn or character
+                const carInitialPos = this.carModel.position;
+                if (coinPosition.distanceTo(carInitialPos) < 5) continue; // Avoid spawning too close to initial car spot
+
+                // More advanced: Check against building colliders (optional, simplified for now)
+                // For simplicity, we are not checking building colliders here yet, but it would be ideal.
+                // if (this.collides(coinPosition)) continue;
+
+                coin.position.copy(coinPosition);
+                placed = true;
+            }
+
+            if (!placed) { // If failed to place after attempts, place it at a default location or skip
+                 console.warn("Failed to place a coin without collision after several attempts. Placing at origin.");
+                 coin.position.set(0, this.coinHeight / 2 + 0.1, 0); // Fallback
+            }
+
+            this.coins.push(coin as THREE.Group); // Cast to Group, though it's a Mesh. THREE.Mesh extends THREE.Object3D, and Group extends Object3D.
+                                                 // Consider making coins actual THREE.Group if more parts are added to them. For now, Mesh is fine.
+            this.scene.add(coin);
+        }
     }
 
     private createCharacter(): void {
@@ -450,6 +581,7 @@ export class BasicWorld {
         pointLight.position.y = 4.8;
         pointLight.castShadow = false; // Keep false to avoid too many shadow casters
         lanternGroup.add(pointLight);
+        this.streetLights.push(pointLight); // Add to streetlights array
 
         lanternGroup.position.set(x, y, z);
         this.scene.add(lanternGroup);
@@ -541,6 +673,10 @@ export class BasicWorld {
             if (!this.isInCar && event.key === ' ' && !this.isJumping) {
                 this.isJumping = true;
                 this.velocityY = this.jumpStrength;
+                const jumpSound = this.soundEffects.get('jump');
+                if (jumpSound && !jumpSound.isPlaying) {
+                    jumpSound.play();
+                }
             }
             if (event.key.toLowerCase() === 'f') {
                 this.enterOrExitCar();
@@ -570,6 +706,11 @@ export class BasicWorld {
             this.cameraTarget = this.character;
             this.cameraTargetOffset = new THREE.Vector3(0, this.characterHeight * 0.8, 0);
             this.carSpeed = 0; // Stop car immediately when exiting
+
+            const engineSound = this.soundEffects.get('engine');
+            if (engineSound && engineSound.isPlaying) {
+                engineSound.stop();
+            }
         } else {
             const distanceToCar = this.character.position.distanceTo(this.carModel.position);
             if (distanceToCar < this.enterCarDistance) {
@@ -579,6 +720,11 @@ export class BasicWorld {
                 this.cameraTargetOffset = new THREE.Vector3(0, 1.5, 0); // Camera offset for car
                 this.carSpeed = 0; // Ensure car is stationary on entry
                 this.carSteeringInput = 0; // Reset steering
+
+                const engineSound = this.soundEffects.get('engine');
+                if (engineSound && !engineSound.isPlaying) {
+                    engineSound.play();
+                }
             }
         }
     }
@@ -594,6 +740,8 @@ export class BasicWorld {
     }
 
     private updateGameLogic(deltaTime: number): void {
+        this.updateDayNightCycle(deltaTime); // Update day/night cycle first
+
         if (this.isInCar) {
             this.updateCarMovement(deltaTime);
         } else {
@@ -601,7 +749,141 @@ export class BasicWorld {
         }
         this.updateCameraOrbit();
         this.wrapWorld();
+        this.updateCoins(deltaTime); // Animate coins
+        this.checkCoinCollection(); // Check for collections
     }
+
+    private updateCoins(deltaTime: number): void {
+        this.coins.forEach(coin => {
+            // Ensure coin is a Mesh and not just a Group for rotation properties
+            if (coin instanceof THREE.Mesh && coin.visible) {
+                coin.rotation.y += 1 * deltaTime;
+            }
+        });
+    }
+
+    private checkCoinCollection(): void {
+        if (!this.character || !this.carModel) return; // Ensure models are loaded
+
+        const playerPosition = this.isInCar ? this.carModel.position : this.character.position;
+
+        this.coins.forEach(coin => {
+            if (coin.visible && playerPosition.distanceTo(coin.position) < this.coinCollectionDistance) {
+                coin.visible = false;
+                this.collectedCoinsCount++;
+                this.updateCoinUI();
+
+                const coinSound = this.soundEffects.get('coin');
+                if (coinSound) { // Play it fresh, even if a previous one was cut short by rapid collection
+                    if (coinSound.isPlaying) {
+                        coinSound.stop();
+                    }
+                    coinSound.play();
+                }
+
+                const activeCoins = this.coins.filter(c => c.visible).length;
+                if (activeCoins === 0) {
+                    this.scheduleRespawnAllCoins();
+                }
+            }
+        });
+    }
+
+    private scheduleRespawnAllCoins(): void {
+        if (this.respawnAllCoinsTimeout !== null) {
+            clearTimeout(this.respawnAllCoinsTimeout);
+        }
+        // console.log(`All coins collected! Scheduling respawn in ${this.COIN_RESPAWN_DELAY_MS / 1000}s.`);
+        this.respawnAllCoinsTimeout = setTimeout(() => {
+            this.respawnAllCoins();
+        }, this.COIN_RESPAWN_DELAY_MS);
+    }
+
+    private respawnAllCoins(): void {
+        // console.log("Respawning all coins.");
+        this.coins.forEach(coin => {
+            coin.visible = true;
+            // Optional: Re-randomize positions here if desired. For now, they respawn in the same spot.
+        });
+        this.respawnAllCoinsTimeout = null;
+        // If score should reset or some other logic upon respawn, add here.
+    }
+
+    // Helper for LERP
+    private lerpColor(color1: THREE.Color, color2: THREE.Color, t: number): THREE.Color {
+        const color = color1.clone();
+        return color.lerp(color2, t);
+    }
+
+    private lerpScalar(value1: number, value2: number, t: number): number {
+        return value1 * (1 - t) + value2 * t;
+    }
+
+
+    private updateDayNightCycle(deltaTime: number): void {
+        this.currentTimeOfDaySeconds = (this.currentTimeOfDaySeconds + deltaTime) % this.cycleDurationSeconds;
+        const phase = this.currentTimeOfDaySeconds / this.cycleDurationSeconds; // 0 to 1
+
+        // Define keyframes (time, sunIntensity, sunColor, ambientIntensity, ambientColor, fogColor)
+        const keyframes = [
+            { time: 0,    sunIntensity: 0.1, sunColor: new THREE.Color(0x102040), ambientIntensity: 0.1, ambientColor: new THREE.Color(0x051015), fogColor: new THREE.Color(0x000510) }, // Night
+            { time: 0.20, sunIntensity: 0.4, sunColor: new THREE.Color(0x8060a0), ambientIntensity: 0.3, ambientColor: new THREE.Color(0x202030), fogColor: new THREE.Color(0x101020) }, // Dawn
+            { time: 0.25, sunIntensity: 1.0, sunColor: new THREE.Color(0xffddaa), ambientIntensity: 0.8, ambientColor: new THREE.Color(0x404060), fogColor: new THREE.Color(0x87CEEB) }, // Midday / Day
+            { time: 0.30, sunIntensity: 1.0, sunColor: new THREE.Color(0xffddaa), ambientIntensity: 0.8, ambientColor: new THREE.Color(0x404060), fogColor: new THREE.Color(0x87CEEB) }, // Midday / Day
+            { time: 0.70, sunIntensity: 0.6, sunColor: new THREE.Color(0xff8c60), ambientIntensity: 0.5, ambientColor: new THREE.Color(0x302020), fogColor: new THREE.Color(0x604030) }, // Dusk
+            { time: 0.75, sunIntensity: 0.1, sunColor: new THREE.Color(0x102040), ambientIntensity: 0.1, ambientColor: new THREE.Color(0x051015), fogColor: new THREE.Color(0x000510) }, // Night
+            { time: 1.0,  sunIntensity: 0.1, sunColor: new THREE.Color(0x102040), ambientIntensity: 0.1, ambientColor: new THREE.Color(0x051015), fogColor: new THREE.Color(0x000510) }  // Night (repeat for wrap)
+        ];
+
+        let prevFrame = keyframes[0];
+        let nextFrame = keyframes[1];
+
+        for (let i = 1; i < keyframes.length; i++) {
+            if (phase < keyframes[i].time) {
+                prevFrame = keyframes[i-1];
+                nextFrame = keyframes[i];
+                break;
+            }
+        }
+
+        const t = (phase - prevFrame.time) / (nextFrame.time - prevFrame.time);
+
+        // Interpolate sun/moon light properties
+        this.sunMoonLight.intensity = this.lerpScalar(prevFrame.sunIntensity, nextFrame.sunIntensity, t);
+        this.sunMoonLight.color.copy(this.lerpColor(prevFrame.sunColor, nextFrame.sunColor, t));
+
+        // Interpolate ambient light properties
+        this.ambientLight.intensity = this.lerpScalar(prevFrame.ambientIntensity, nextFrame.ambientIntensity, t);
+        this.ambientLight.color.copy(this.lerpColor(prevFrame.ambientColor, nextFrame.ambientColor, t));
+
+        // Interpolate fog color
+        if (this.scene.fog instanceof THREE.Fog) {
+             this.scene.fog.color.copy(this.lerpColor(prevFrame.fogColor, nextFrame.fogColor, t));
+        }
+        if (this.scene.background instanceof THREE.Color) { // If background is a flat color, update it too
+            (this.scene.background as THREE.Color).copy(this.lerpColor(prevFrame.fogColor, nextFrame.fogColor, t));
+        }
+
+
+        // Update sun/moon position (arc across the sky)
+        const sunAngle = phase * Math.PI * 2; // Full circle for 24 hours
+        this.sunMoonLight.position.set(
+            Math.cos(sunAngle - Math.PI/2) * 70, // Moves from east to west-like
+            Math.sin(sunAngle - Math.PI/2) * 70,  // Peaks at midday (phase 0.25 -> angle PI/2)
+            30 // Keep Z somewhat constant or vary slightly for seasons (optional)
+        );
+        // this.sunMoonLight.lookAt(0,0,0); // Already handled by target
+
+        // Control streetlights
+        const isNightTime = this.sunMoonLight.intensity < 0.3; // Activate streetlights when sun is dim
+        const targetStreetLightIntensity = isNightTime ? 1.5 : 0;
+
+        this.streetLights.forEach(light => {
+            // Smooth transition for streetlight intensity
+            light.intensity = this.lerpScalar(light.intensity, targetStreetLightIntensity, deltaTime * 1.0); // Adjust 1.0 for faster/slower transition
+        });
+    }
+
 
     private updateCharacterMovement(deltaTime: number): void {
         const moveDistance = this.moveSpeed * deltaTime;
@@ -622,6 +904,16 @@ export class BasicWorld {
                 this.character.position.copy(candidate);
             }
             // Character rotation
+            if (!this.isJumping) { // Play footstep sound only if on ground and moving
+                this.footstepTimer -= deltaTime;
+                if (this.footstepTimer <= 0) {
+                    const footstepSound = this.soundEffects.get('footstep');
+                    if (footstepSound && !footstepSound.isPlaying) {
+                        footstepSound.play();
+                    }
+                    this.footstepTimer = this.footstepInterval;
+                }
+            }
             const targetAngle = Math.atan2(movementDirection.x, movementDirection.z);
             let angleDiff = targetAngle - this.character.rotation.y;
             while (angleDiff < -Math.PI) angleDiff += 2 * Math.PI;
@@ -649,6 +941,8 @@ export class BasicWorld {
 
     private updateCarMovement(deltaTime: number): void {
         if (!this.carModel || !this.carBody) return;
+
+        const engineSound = this.soundEffects.get('engine');
 
         let accelerationInput = 0;
         if (this.keysPressed['w'] || this.keysPressed['arrowup']) accelerationInput = 1;
@@ -687,6 +981,26 @@ export class BasicWorld {
             this.carModel.position.copy(candidate);
         } else {
             this.carSpeed = 0;
+        }
+
+        if (engineSound) {
+            const basePlaybackRate = 0.8; // Slightly lower for idle
+            const maxSpeedPitchFactor = 1.8;
+            const normalizedSpeed = Math.abs(this.carSpeed) / this.carMaxSpeed;
+            let targetPlaybackRate = basePlaybackRate + (normalizedSpeed * (maxSpeedPitchFactor - basePlaybackRate));
+
+            if (Math.abs(this.carSpeed) < 0.1) { // Idle or very slow
+                targetPlaybackRate = basePlaybackRate;
+                // If car is supposed to be on and engine is not playing (e.g. after tabbing back)
+                if (this.isInCar && !engineSound.isPlaying) {
+                     engineSound.play(); // Try to restart it if it stopped for some reason
+                }
+            } else {
+                 if (this.isInCar && !engineSound.isPlaying) {
+                    engineSound.play(); // Ensure it's playing if moving
+                }
+            }
+            engineSound.setPlaybackRate(targetPlaybackRate);
         }
 
         // Keep car on ground (simple approach)
@@ -731,27 +1045,59 @@ export class BasicWorld {
 
     private wrapWorld(): void {
         const target = this.cameraTarget || this.character;
+        if (!target) return; // Guard if target is not yet initialized
+
         const max = this.chunkSize / 2;
         let offsetX = 0;
         let offsetZ = 0;
+
         if (target.position.x > max) offsetX = -this.chunkSize;
-        if (target.position.x < -max) offsetX = this.chunkSize;
+        else if (target.position.x < -max) offsetX = this.chunkSize;
         if (target.position.z > max) offsetZ = -this.chunkSize;
-        if (target.position.z < -max) offsetZ = this.chunkSize;
+        else if (target.position.z < -max) offsetZ = this.chunkSize;
+
         if (offsetX !== 0 || offsetZ !== 0) {
-            this.character.position.x += offsetX;
-            this.character.position.z += offsetZ;
-            this.carModel.position.x += offsetX;
-            this.carModel.position.z += offsetZ;
-            this.scene.children.forEach(obj => {
-                if (obj !== this.camera && obj !== this.character && obj !== this.carModel) {
-                    obj.position.x += offsetX;
-                    obj.position.z += offsetZ;
-                }
-            });
+            // Move player and car
+            if (this.character) {
+                this.character.position.x += offsetX;
+                this.character.position.z += offsetZ;
+            }
+            if (this.carModel) {
+                this.carModel.position.x += offsetX;
+                this.carModel.position.z += offsetZ;
+            }
+
+            // Move building colliders
             this.buildingColliders.forEach(b => {
                 b.min.x += offsetX; b.max.x += offsetX;
                 b.min.z += offsetZ; b.max.z += offsetZ;
+            });
+
+            // Move coins
+            this.coins.forEach(coin => {
+                coin.position.x += offsetX;
+                coin.position.z += offsetZ;
+            });
+
+            // Move other general scene objects
+            this.scene.children.forEach(obj => {
+                const isPlayerCharacter = obj === this.character;
+                const isCar = obj === this.carModel;
+                const isSunMoon = obj === this.sunMoonLight || obj === this.sunMoonLight.target;
+                const isACoin = this.coins.includes(obj as THREE.Group); // Coins are already handled
+
+                // Check if it's a street lantern group.
+                // This check assumes streetlights are groups and their pointlight is a direct child.
+                let isStreetLanternGroup = false;
+                if (obj instanceof THREE.Group && obj.children.length > 0) {
+                    isStreetLanternGroup = obj.children.some(child => child instanceof THREE.PointLight && this.streetLights.includes(child));
+                }
+
+
+                if (!isPlayerCharacter && !isCar && !isSunMoon && !isACoin && !isStreetLanternGroup && obj !== this.camera) {
+                    obj.position.x += offsetX;
+                    obj.position.z += offsetZ;
+                }
             });
         }
     }
@@ -761,5 +1107,27 @@ export class BasicWorld {
         const deltaTime = this.clock.getDelta();
         this.updateGameLogic(deltaTime);
         this.renderer.render(this.scene, this.camera);
+    }
+
+    public destroy(): void {
+        if (this.respawnAllCoinsTimeout !== null) {
+            clearTimeout(this.respawnAllCoinsTimeout);
+            this.respawnAllCoinsTimeout = null;
+        }
+
+        // Stop all sound effects
+        if (this.soundEffects) {
+            this.soundEffects.forEach(sound => {
+                if (sound.isPlaying) {
+                    sound.stop();
+                }
+            });
+        }
+        if(this.audioListener && this.camera){
+            this.camera.remove(this.audioListener); // Detach listener
+        }
+
+        // Potentially remove event listeners, dispose THREE.js objects, etc.
+        console.log("BasicWorld destroyed, timeouts cleared, sounds stopped, listener detached.");
     }
 }
