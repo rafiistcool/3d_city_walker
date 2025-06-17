@@ -232,16 +232,40 @@ export class BasicWorld {
 
     private createCar(): void {
         this.carModel = new THREE.Group();
-        const bodyWidth = 2;
-        const bodyHeight = 1;
-        const bodyDepth = 4;
+        const bodyWidth = 1.9;
+        const bodyHeight = 0.9;
+        const bodyLength = 4.3;
+        const halfLength = bodyLength / 2;
 
-        const carBodyGeo = new THREE.BoxGeometry(bodyWidth, bodyHeight, bodyDepth);
+        const bodyShape = new THREE.Shape();
+        bodyShape.moveTo(-halfLength, 0);
+        bodyShape.lineTo(-halfLength * 0.9, bodyHeight * 0.3); // front slope
+        bodyShape.lineTo(-halfLength * 0.6, bodyHeight * 0.75); // hood
+        bodyShape.quadraticCurveTo(0, bodyHeight * 1.1, halfLength * 0.6, bodyHeight * 0.75); // roof curve
+        bodyShape.lineTo(halfLength * 0.9, bodyHeight * 0.3); // rear slope
+        bodyShape.lineTo(halfLength, 0);
+        bodyShape.closePath();
+
+        const extrudeSettings: THREE.ExtrudeGeometryOptions = {
+            depth: bodyWidth,
+            bevelEnabled: false,
+            steps: 1,
+        };
+        const carBodyGeo = new THREE.ExtrudeGeometry(bodyShape, extrudeSettings);
+        carBodyGeo.rotateY(Math.PI / 2); // Align width with X axis
+        carBodyGeo.translate(0, bodyHeight / 2 + 0.3, 0);
+
         this.carBody = new THREE.Mesh(carBodyGeo, this.carBodyMaterial);
-        this.carBody.position.y = bodyHeight / 2 + 0.3; // Wheels lift the body a bit
         this.carBody.castShadow = true;
         this.carBody.receiveShadow = true;
         this.carModel.add(this.carBody);
+
+        // Rear wing
+        const wingGeo = new THREE.BoxGeometry(bodyWidth * 0.9, 0.05, 0.4);
+        const wing = new THREE.Mesh(wingGeo, this.carBodyMaterial);
+        wing.position.set(0, bodyHeight + 0.5, -halfLength - 0.2);
+        wing.castShadow = true;
+        this.carModel.add(wing);
 
         const wheelRadius = 0.4;
         const wheelWidth = 0.3;
