@@ -6,15 +6,6 @@
 // Inform TypeScript about the global THREE object from the CDN
 declare global {
   namespace THREE {
-    // Forward declarations for clarity if needed, or rely on order of definition
-    class Vector3 {}
-    class Quaternion {}
-    class Euler {}
-    class Color {}
-    class Object3D {}
-    class Light {} // Base for light types
-    class Fog {}
-
     // Core classes for 3D operations and scene graph
     class Vector3 {
         constructor(x?: number, y?: number, z?: number);
@@ -172,7 +163,7 @@ declare global {
   }
 }
 
-class BasicWorld {
+export class BasicWorld {
     private scene: THREE.Scene;
     private camera: THREE.PerspectiveCamera;
     private renderer: THREE.WebGLRenderer;
@@ -655,20 +646,3 @@ class BasicWorld {
         this.renderer.render(this.scene, this.camera);
     }
 }
-
-if (typeof THREE !== 'undefined') {
-    new BasicWorld();
-} else {
-    console.error('Three.js has not been loaded.');
-    const canvas = document.getElementById('webglCanvas') as HTMLCanvasElement;
-    if (canvas) {
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-            ctx.fillStyle = 'red';
-            ctx.font = '16px Arial';
-            ctx.fillText('Error: Three.js failed to load. Check CDN link.', 10, 50);
-        }
-    }
-}
-
-export {}; // Ensures this file is treated as a module by TypeScript
