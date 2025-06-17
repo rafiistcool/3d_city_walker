@@ -15,6 +15,8 @@ export class BasicWorld {
     // Player and Character
     private character!: THREE.Group;
     private characterMixer?: THREE.AnimationMixer;
+    private animations: Record<string, THREE.AnimationAction> = {};
+    private currentAnimation?: THREE.AnimationAction;
     private cameraTarget: THREE.Object3D;
 
     private moveSpeed: number = 4;
@@ -225,8 +227,9 @@ export class BasicWorld {
             this.character.position.set(x, this.characterFeetY, z);
             this.characterMixer = new THREE.AnimationMixer(gltf.scene);
             gltf.animations.forEach(clip => {
-                this.characterMixer!.clipAction(clip).play();
+                this.animations[clip.name] = this.characterMixer!.clipAction(clip);
             });
+            this.playAnimation('Idle');
         });
     }
 
@@ -506,6 +509,17 @@ export class BasicWorld {
         this.wrapWorld();
     }
 
+    private playAnimation(name: string): void {
+        if (!this.characterMixer) return;
+        const action = this.animations[name];
+        if (!action || this.currentAnimation === action) return;
+        if (this.currentAnimation) {
+            this.currentAnimation.fadeOut(0.2);
+        }
+        action.reset().fadeIn(0.2).play();
+        this.currentAnimation = action;
+    }
+
     private updateCharacterMovement(deltaTime: number): void {
         const moveDistance = this.moveSpeed * deltaTime;
         let didMove = false;
@@ -517,6 +531,8 @@ export class BasicWorld {
         if (this.keysPressed['s'] || this.keysPressed['arrowdown']) { movementDirection.sub(forward); didMove = true; }
         if (this.keysPressed['a'] || this.keysPressed['arrowleft']) { movementDirection.add(right); didMove = true; }
         if (this.keysPressed['d'] || this.keysPressed['arrowright']) { movementDirection.sub(right); didMove = true; }
+
+        this.playAnimation(didMove ? 'Walking' : 'Idle');
 
         if (didMove) {
             movementDirection.normalize().multiplyScalar(moveDistance);
