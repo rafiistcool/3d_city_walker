@@ -1,5 +1,6 @@
 import * as THREE from 'three';
-import { WebGLPathTracer, PhysicalPathTracingMaterial, BlurredEnvMapGenerator, GradientEquirectTexture } from 'three-gpu-pathtracer';
+import { WebGLPathTracer, BlurredEnvMapGenerator, GradientEquirectTexture } from 'three-gpu-pathtracer';
+import { PhysicalPathTracingMaterial } from 'three-gpu-pathtracer/src/materials/pathtracing/PhysicalPathTracingMaterial.js';
 
 export class RaytracingWorld {
   private renderer: THREE.WebGLRenderer;

@@ -3,200 +3,17 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import * as THREE from 'three';
 import { GLTFLoader } from 'three-stdlib';
 
-// Inform TypeScript about the global THREE object from the CDN
-declare global {
-  namespace THREE {
-    // Core classes for 3D operations and scene graph
-    class Vector3 {
-        constructor(x?: number, y?: number, z?: number);
-        x: number;
-        y: number;
-        z: number;
-        set(x: number, y: number, z: number): this;
-        add(v: Vector3): this;
-        sub(v: Vector3): this;
-        multiplyScalar(s: number): this;
-        normalize(): this;
-        applyQuaternion(q: Quaternion): this;
-        copy(v: Vector3): this;
-        distanceTo(v: Vector3): number;
-    }
-
-    class Quaternion {
-        constructor(x?: number, y?: number, z?: number, w?: number);
-        x: number;
-        y: number;
-        z: number;
-        w: number;
-        // Add methods like .setFromEuler, .multiply if explicitly used.
-    }
-
-    class Euler {
-        constructor(x?: number, y?: number, z?: number, order?: string);
-        x: number;
-        y: number;
-        z: number;
-        order?: string;
-        set(x: number, y: number, z: number, order?: string): this;
-    }
-
-    class Object3D {
-      constructor();
-      position: Vector3;
-      rotation: Euler;
-      quaternion: Quaternion;
-      visible: boolean;
-      castShadow: boolean;
-      receiveShadow: boolean;
-      add(...object: Object3D[]): this;
-      lookAt(vector: Vector3 | number, y?: number, z?: number): void;
-      // Other common Object3D properties: up, scale, parent, children, matrix, matrixWorld
-    }
-
-    class Group extends Object3D {
-        constructor();
-    }
-
-    class Mesh extends Object3D {
-        constructor(geometry?: any, material?: any | any[]);
-        geometry: any; // Could be THREE.BufferGeometry
-        material: any | any[]; // Could be THREE.Material or THREE.Material[]
-    }
-
-    // Scene, Camera, Renderer, Lights, Geometries, Materials
-    class Scene {
-      constructor();
-      background: Color | any; // Allow 'any' for textures, null, etc.
-      fog: Fog | any; // Allow 'any' for null
-      add(...object: Object3D[]): void;
-    }
-
-    class PerspectiveCamera extends Object3D {
-      constructor(fov?: number, aspect?: number, near?: number, far?: number);
-      aspect: number;
-      updateProjectionMatrix: () => void;
-      // position, rotation, lookAt inherited from Object3D
-    }
-
-    class WebGLRenderer {
-      constructor(parameters?: { canvas?: HTMLCanvasElement, antialias?: boolean });
-      domElement: HTMLCanvasElement;
-      shadowMap: { enabled: boolean, type: number };
-      setSize(width: number, height: number): void;
-      render(scene: Scene, camera: PerspectiveCamera): void;
-    }
-
-    class Clock {
-      constructor(autoStart?: boolean);
-      getDelta: () => number;
-    }
-
-    class Color {
-      constructor(r?: number | string, g?: number, b?: number);
-      // Add methods/properties if used: .setHex, .r, .g, .b
-    }
-
-    class Fog {
-      constructor(color: number | string | Color, near?: number, far?: number);
-    }
-
-    class CylinderGeometry {
-      constructor(radiusTop?: number, radiusBottom?: number, height?: number, radialSegments?: number, heightSegments?: number, openEnded?: boolean, thetaStart?: number, thetaLength?: number);
-      parameters: { radiusTop: number, radiusBottom: number, height: number, radialSegments: number };
-    }
-
-    class SphereGeometry {
-      constructor(radius?: number, widthSegments?: number, heightSegments?: number, phiStart?: number, phiLength?: number, thetaStart?: number, thetaLength?: number);
-    }
-
-    class BoxGeometry {
-      constructor(width?: number, height?: number, depth?: number, widthSegments?: number, heightSegments?: number, depthSegments?: number);
-    }
-
-    class PlaneGeometry {
-      constructor(width?: number, height?: number, widthSegments?: number, heightSegments?: number);
-    }
-
-    class MeshStandardMaterial {
-      constructor(parameters?: {
-        color?: number | string | Color,
-        roughness?: number,
-        metalness?: number,
-        map?: any, // Texture
-        emissive?: number | string | Color,
-        emissiveIntensity?: number,
-        side?: number,
-        [key: string]: any; // Allow other standard material properties
-      });
-      clone: () => this;
-      side?: number;
-      emissive?: Color;
-      emissiveIntensity?: number;
-      color: Color;
-      roughness: number;
-      metalness: number;
-    }
-
-    // Lights hierarchy
-    class Light extends Object3D {
-        constructor(color?: number | string | Color, intensity?: number);
-        color: Color;
-        intensity: number;
-    }
-
-    class AmbientLight extends Light {
-      constructor(color?: number | string | Color, intensity?: number);
-    }
-
-    class DirectionalLight extends Light {
-        constructor(color?: number | string | Color, intensity?: number);
-        shadow: any; // THREE.DirectionalLightShadow
-    }
-    class PointLight extends Light {
-        constructor(color?: number | string | Color, intensity?: number, distance?: number, decay?: number);
-        // distance and decay are specific to PointLight
-    }
-
-    // Constants accessed as properties of THREE
-    const PCFSoftShadowMap: number;
-    const DoubleSide: number;
-    const RepeatWrapping: number;
-    const ACESFilmicToneMapping: number;
-    const sRGBEncoding: number;
-    class Texture {
-      wrapS: number; wrapT: number;
-      repeat: { set(x:number, y:number): void };
-    }
-    class CubeTexture extends Texture {}
-    class TextureLoader {
-      load(path: string): Texture;
-      setPath(path: string): this;
-      setCrossOrigin(origin: string): this;
-    }
-    class CubeTextureLoader {
-      load(paths: string[]): CubeTexture;
-      setPath(path: string): this;
-      setCrossOrigin(origin: string): this;
-    }
-    class Box3 {
-      min: Vector3; max: Vector3;
-      constructor(min?: Vector3, max?: Vector3);
-      set(min: Vector3, max: Vector3): this;
-      containsPoint(point: Vector3): boolean;
-    }
-  }
-}
-
 export class BasicWorld {
-    private scene: THREE.Scene;
-    private camera: THREE.PerspectiveCamera;
-    private renderer: THREE.WebGLRenderer;
-    private clock: THREE.Clock;
+    private scene!: THREE.Scene;
+    private camera!: THREE.PerspectiveCamera;
+    private renderer!: THREE.WebGLRenderer;
+    private clock!: THREE.Clock;
 
     // Player and Character
-    private character: THREE.Group;
+    private character!: THREE.Group;
     private characterMixer?: THREE.AnimationMixer;
     private cameraTarget: THREE.Object3D;
 
@@ -220,8 +37,8 @@ export class BasicWorld {
     private readonly characterHeight: number = 1.8;
 
     // Car properties
-    private carModel: THREE.Group;
-    private carBody: THREE.Mesh;
+    private carModel!: THREE.Group;
+    private carBody!: THREE.Mesh;
     private carWheels: THREE.Mesh[] = [];
     private isInCar: boolean = false;
     private carSpeed: number = 0;
@@ -232,7 +49,6 @@ export class BasicWorld {
     private carSteeringInput: number = 0; // -1 for right, 0 for straight, 1 for left
     private readonly carMaxSteeringAngleRad: number = Math.PI / 7;
     private readonly carWheelBase: number = 2.8; // Distance between front and rear axles
-    private readonly wheelRotationSpeedFactor: number = 25; // Visual wheel spin rate
     private readonly enterCarDistance: number = 3.0; // Max distance to enter car
 
     // City Layout Parameters
@@ -244,26 +60,23 @@ export class BasicWorld {
 
     // Materials
     private buildingMaterials: THREE.MeshStandardMaterial[] = [];
-    private streetMaterial: THREE.MeshStandardMaterial;
-    private lanternPoleMaterial: THREE.MeshStandardMaterial;
-    private lanternLightMaterial: THREE.MeshStandardMaterial;
-    private characterMaterial: THREE.MeshStandardMaterial;
-    private carBodyMaterial: THREE.MeshStandardMaterial;
-    private wheelMaterial: THREE.MeshStandardMaterial;
+    private streetMaterial!: THREE.MeshStandardMaterial;
+    private lanternPoleMaterial!: THREE.MeshStandardMaterial;
+    private lanternLightMaterial!: THREE.MeshStandardMaterial;
+    private carBodyMaterial!: THREE.MeshStandardMaterial;
+    private wheelMaterial!: THREE.MeshStandardMaterial;
 
     // Textures and environment
     private textureLoader: THREE.TextureLoader;
     private cubeTextureLoader: THREE.CubeTextureLoader;
-    private groundTexture: THREE.Texture;
-    private buildingTexture: THREE.Texture;
-    private streetTexture: THREE.Texture;
-    private environmentMap: THREE.CubeTexture;
+    private groundTexture!: THREE.Texture;
+    private buildingTexture!: THREE.Texture;
+    private streetTexture!: THREE.Texture;
+    private environmentMap!: THREE.CubeTexture;
 
     // Collision and world chunks
     private buildingColliders: THREE.Box3[] = [];
-    private generatedChunks: Set<string> = new Set();
-    private activeChunks: Map<string, THREE.Group> = new Map();
-    private chunkSize: number;
+    private chunkSize!: number;
 
     private collides(pos: THREE.Vector3): boolean {
         for (const box of this.buildingColliders) {
@@ -304,9 +117,9 @@ export class BasicWorld {
         this.renderer.setSize(window.innerWidth, window.innerHeight);
         this.renderer.shadowMap.enabled = true;
         this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-        this.renderer.physicallyCorrectLights = true;
+        (this.renderer as any).useLegacyLights = false;
         this.renderer.toneMapping = THREE.ACESFilmicToneMapping;
-        (this.renderer as any).outputEncoding = THREE.sRGBEncoding;
+        this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
         this.clock = new THREE.Clock();
 
@@ -364,7 +177,6 @@ export class BasicWorld {
         this.streetMaterial = new THREE.MeshStandardMaterial({ map: this.streetTexture, roughness: 0.9, metalness: 0.2, side: THREE.DoubleSide });
         this.lanternPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x454545, roughness: 0.5, metalness: 0.8 });
         this.lanternLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffee, emissive: new THREE.Color(0xffffaa), emissiveIntensity: 1 });
-        this.characterMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.5, metalness: 0.1 });
         this.carBodyMaterial = new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xff0000, roughness: 0.1, metalness: 1.0, envMap: this.environmentMap });
         this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7, metalness: 0.3, envMap: this.environmentMap });
     }
