@@ -1,0 +1,5 @@
+{
+  "name": "3D City Walker",
+  "description": "A simple 3D game where you can walk in a basic city environment. Uses Three.js for rendering.",
+  "requestFramePermissions": []
+}
