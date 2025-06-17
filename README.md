@@ -1,7 +1,8 @@
 # Run and deploy your AI Studio app
 
-This contains everything you need to run your app locally. The application now uses the
-`three-gpu-pathtracer` library to render a scene with GPU path tracing.
+This contains everything you need to run your app locally. The application now uses
+an interactive 3D scene with a larger city, reflective buildings and an animated
+character.
 
 ## Run Locally
 

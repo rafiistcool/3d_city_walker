@@ -3,6 +3,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import { GLTFLoader } from 'three-stdlib';
+
 // Inform TypeScript about the global THREE object from the CDN
 declare global {
   namespace THREE {
@@ -195,6 +197,7 @@ export class BasicWorld {
 
     // Player and Character
     private character: THREE.Group;
+    private characterMixer?: THREE.AnimationMixer;
     private cameraTarget: THREE.Object3D;
 
     private moveSpeed: number = 4;
@@ -235,7 +238,7 @@ export class BasicWorld {
     // City Layout Parameters
     private readonly blockSize: number = 20;
     private readonly streetWidth: number = 6;
-    private readonly citySize: number = 5; // Number of blocks in one dimension
+    private readonly citySize: number = 8; // Number of blocks in one dimension
     private cityOffset: number = 0;
 
 
@@ -253,6 +256,7 @@ export class BasicWorld {
     private cubeTextureLoader: THREE.CubeTextureLoader;
     private groundTexture: THREE.Texture;
     private buildingTexture: THREE.Texture;
+    private streetTexture: THREE.Texture;
     private environmentMap: THREE.CubeTexture;
 
     // Collision and world chunks
@@ -280,7 +284,6 @@ export class BasicWorld {
         this.init();
         this.loadTextures();
         this.initMaterials();
-        this.createCharacter(); // Character position will be set based on car's calculated street spawn
         this.createCar();       // Car will be placed on a calculated street position
         this.cameraTarget = this.character; // Set initial target
         this.createObjects();
@@ -324,13 +327,19 @@ export class BasicWorld {
         this.textureLoader.setCrossOrigin('anonymous');
         this.cubeTextureLoader.setCrossOrigin('anonymous');
 
-        const gridUrl = 'https://threejs.org/examples/textures/uv_grid_opengl.jpg';
-        this.groundTexture = this.textureLoader.load(gridUrl);
+        const groundUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/terrain/grasslight-big.jpg';
+        this.groundTexture = this.textureLoader.load(groundUrl);
         this.groundTexture.wrapS = this.groundTexture.wrapT = THREE.RepeatWrapping;
         this.groundTexture.repeat.set(50, 50);
 
-        this.buildingTexture = this.textureLoader.load(gridUrl);
+        const brickUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/brick_diffuse.jpg';
+        this.buildingTexture = this.textureLoader.load(brickUrl);
         this.buildingTexture.wrapS = this.buildingTexture.wrapT = THREE.RepeatWrapping;
+
+        const streetUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/floors/FloorsCheckerboard_S_Diffuse.jpg';
+        this.streetTexture = this.textureLoader.load(streetUrl);
+        this.streetTexture.wrapS = this.streetTexture.wrapT = THREE.RepeatWrapping;
+        this.streetTexture.repeat.set(2, 2);
 
         this.environmentMap = this.cubeTextureLoader.load([
             'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
@@ -346,43 +355,42 @@ export class BasicWorld {
 
     private initMaterials(): void {
         this.buildingMaterials = [
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x8c8c8c, roughness: 0.8, metalness: 0.2 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x5c5c5c, roughness: 0.7, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xcc6666, roughness: 0.9, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xa08d77, roughness: 0.8, metalness: 0.1 }),
-            new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0x778899, roughness: 0.6, metalness: 0.3 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x8c8c8c, roughness: 0.5, metalness: 0.4 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x5c5c5c, roughness: 0.4, metalness: 0.6 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0xcc6666, roughness: 0.7, metalness: 0.3 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0xa08d77, roughness: 0.6, metalness: 0.4 }),
+            new THREE.MeshStandardMaterial({ map: this.buildingTexture, envMap: this.environmentMap, color: 0x778899, roughness: 0.3, metalness: 0.8 }),
         ];
-        this.streetMaterial = new THREE.MeshStandardMaterial({ color: 0x333333, roughness: 0.9, metalness: 0.1, side: THREE.DoubleSide });
+        this.streetMaterial = new THREE.MeshStandardMaterial({ map: this.streetTexture, roughness: 0.9, metalness: 0.2, side: THREE.DoubleSide });
         this.lanternPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x454545, roughness: 0.5, metalness: 0.8 });
         this.lanternLightMaterial = new THREE.MeshStandardMaterial({ color: 0xffffee, emissive: new THREE.Color(0xffffaa), emissiveIntensity: 1 });
         this.characterMaterial = new THREE.MeshStandardMaterial({ color: 0x0077ff, roughness: 0.5, metalness: 0.1 });
-        this.carBodyMaterial = new THREE.MeshStandardMaterial({ color: 0xff0000, roughness: 0.3, metalness: 0.6, envMap: this.environmentMap });
-        this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.8, metalness: 0.1 });
+        this.carBodyMaterial = new THREE.MeshStandardMaterial({ map: this.buildingTexture, color: 0xff0000, roughness: 0.1, metalness: 1.0, envMap: this.environmentMap });
+        this.wheelMaterial = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.7, metalness: 0.3, envMap: this.environmentMap });
     }
 
-    private createCharacter(): void {
-        const bodyRadius = 0.4;
-        const bodyHeight = this.characterHeight * 0.7;
-        const headRadius = this.characterHeight * 0.15;
-
+    private loadAnimatedCharacter(x: number, z: number): void {
         this.character = new THREE.Group();
-        // Position will be set relative to car spawn
-
-        const bodyGeometry = new THREE.CylinderGeometry(bodyRadius, bodyRadius, bodyHeight, 16);
-        const body = new THREE.Mesh(bodyGeometry, this.characterMaterial);
-        body.position.y = bodyHeight / 2;
-        body.castShadow = true;
-        body.receiveShadow = true;
-        this.character.add(body);
-
-        const headGeometry = new THREE.SphereGeometry(headRadius, 16, 16);
-        const head = new THREE.Mesh(headGeometry, this.characterMaterial);
-        head.position.y = bodyHeight + headRadius * 1.1;
-        head.castShadow = true;
-        head.receiveShadow = true;
-        this.character.add(head);
-
         this.scene.add(this.character);
+
+        const loader = new GLTFLoader();
+        const url = 'https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb';
+        loader.load(url, (gltf) => {
+            gltf.scene.traverse(obj => {
+                if ((obj as any).isMesh) {
+                    const mesh = obj as THREE.Mesh;
+                    mesh.castShadow = true;
+                    mesh.receiveShadow = true;
+                }
+            });
+            gltf.scene.scale.set(0.8, 0.8, 0.8);
+            this.character.add(gltf.scene);
+            this.character.position.set(x, this.characterFeetY, z);
+            this.characterMixer = new THREE.AnimationMixer(gltf.scene);
+            gltf.animations.forEach(clip => {
+                this.characterMixer!.clipAction(clip).play();
+            });
+        });
     }
 
     private createCar(): void {
@@ -429,8 +437,8 @@ export class BasicWorld {
         this.carModel.position.set(carSpawnX, 0, carSpawnZ); // Y=0, car physics handles height
         this.scene.add(this.carModel);
 
-        // Now set character position near the car
-        this.character.position.set(carSpawnX + 3, this.characterFeetY, carSpawnZ);
+        // Load the character near the car
+        this.loadAnimatedCharacter(carSpawnX + 3, carSpawnZ);
     }
 
     private createStreetLight(x: number, y: number, z: number): void {
@@ -530,6 +538,25 @@ export class BasicWorld {
                     );
                     this.buildingColliders.push(collider);
                     this.scene.add(building);
+                }
+            }
+        }
+
+        // Reflective spheres add more reflective surfaces
+        const sphereGeo = new THREE.SphereGeometry(1, 32, 16);
+        const sphereMat = new THREE.MeshStandardMaterial({ envMap: this.environmentMap, metalness: 1, roughness: 0 });
+        for (let i = 0; i < this.citySize; i++) {
+            for (let j = 0; j < this.citySize; j++) {
+                if (Math.random() < 0.3) {
+                    const sphere = new THREE.Mesh(sphereGeo, sphereMat);
+                    sphere.position.set(
+                        i * (this.blockSize + this.streetWidth) - this.cityOffset + this.blockSize / 2,
+                        1,
+                        j * (this.blockSize + this.streetWidth) - this.cityOffset + this.blockSize / 2
+                    );
+                    sphere.castShadow = true;
+                    sphere.receiveShadow = true;
+                    this.scene.add(sphere);
                 }
             }
         }
@@ -759,6 +786,7 @@ export class BasicWorld {
     private animate(): void {
         requestAnimationFrame(this.animate.bind(this));
         const deltaTime = this.clock.getDelta();
+        if (this.characterMixer) this.characterMixer.update(deltaTime);
         this.updateGameLogic(deltaTime);
         this.renderer.render(this.scene, this.camera);
     }
