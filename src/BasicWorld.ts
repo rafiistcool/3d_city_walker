@@ -202,8 +202,14 @@ export class BasicWorld {
     }
 
     private initMaterials(): void {
+        // More reflective materials for a photo-realistic look
         this.buildingMaterials = this.buildingTextures.map(tex =>
-            new THREE.MeshStandardMaterial({ map: tex, envMap: this.environmentMap, roughness: 0.6, metalness: 0.4 })
+            new THREE.MeshStandardMaterial({
+                map: tex,
+                envMap: this.environmentMap,
+                roughness: 0.4,
+                metalness: 0.5
+            })
         );
         this.streetMaterial = new THREE.MeshStandardMaterial({ map: this.streetTexture, roughness: 0.9, metalness: 0.2, side: THREE.DoubleSide });
         this.lanternPoleMaterial = new THREE.MeshStandardMaterial({ color: 0x454545, roughness: 0.5, metalness: 0.8 });
@@ -345,6 +351,24 @@ export class BasicWorld {
         }
     }
 
+    private addNeonSign(building: THREE.Mesh, width: number, height: number, depth: number): void {
+        if (Math.random() > 0.5) return;
+        const signGeo = new THREE.PlaneGeometry(3, 1);
+        const hue = Math.random() * 360;
+        const color = new THREE.Color(`hsl(${hue},100%,60%)`);
+        const signMat = new THREE.MeshStandardMaterial({
+            color,
+            emissive: color,
+            emissiveIntensity: 5,
+            roughness: 0.3,
+            metalness: 0.8,
+            side: THREE.DoubleSide
+        });
+        const sign = new THREE.Mesh(signGeo, signMat);
+        sign.position.set(0, height * 0.6, depth / 2 + 0.05);
+        building.add(sign);
+    }
+
     private createObjects(): void {
         const groundGeometry = new THREE.PlaneGeometry(600, 600);
         const groundMaterial = new THREE.MeshStandardMaterial({ map: this.groundTexture, side: THREE.DoubleSide });
@@ -415,6 +439,7 @@ export class BasicWorld {
                     building.castShadow = true;
                     building.receiveShadow = true;
                     this.addWindows(building, width, height, depth);
+                    this.addNeonSign(building, width, height, depth);
                     const collider = new THREE.Box3().set(
                         new THREE.Vector3(buildingX - width/2, 0, buildingZ - depth/2),
                         new THREE.Vector3(buildingX + width/2, height, buildingZ + depth/2)
