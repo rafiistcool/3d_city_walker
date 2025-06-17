@@ -1,4 +1,4 @@
-import { RaytracingWorld } from './RaytracingWorld';
+import { BasicWorld } from './BasicWorld';
 
-// Initialize the path-traced scene
-new RaytracingWorld();
+// Initialize the interactive scene
+new BasicWorld();
