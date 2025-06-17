@@ -54,7 +54,7 @@ export class BasicWorld {
     // City Layout Parameters
     private readonly blockSize: number = 20;
     private readonly streetWidth: number = 6;
-    private readonly citySize: number = 8; // Number of blocks in one dimension
+    private readonly citySize: number = 12; // Number of blocks in one dimension
     private cityOffset: number = 0;
 
 
@@ -73,6 +73,15 @@ export class BasicWorld {
     private buildingTexture!: THREE.Texture;
     private streetTexture!: THREE.Texture;
     private environmentMap!: THREE.CubeTexture;
+    private dayEnvironmentMap!: THREE.CubeTexture;
+    private nightEnvironmentMap!: THREE.CubeTexture;
+
+    private sunLight!: THREE.DirectionalLight;
+    private moonLight!: THREE.DirectionalLight;
+    private ambientLight!: THREE.AmbientLight;
+    private dayDuration: number = 120; // seconds
+    private nightDuration: number = 120; // seconds
+    private dayTimer: number = 0;
 
     // Collision and world chunks
     private buildingColliders: THREE.Box3[] = [];
@@ -123,15 +132,22 @@ export class BasicWorld {
 
         this.clock = new THREE.Clock();
 
-        const ambientLight = new THREE.AmbientLight(0x404060, 0.8);
-        this.scene.add(ambientLight); 
+        this.ambientLight = new THREE.AmbientLight(0x404060, 0.8);
+        this.scene.add(this.ambientLight);
 
-        const moonLight = new THREE.DirectionalLight(0xa0a0c0, 0.6);
-        moonLight.position.set(30, 50, 20);
-        moonLight.castShadow = true;
-        moonLight.shadow.mapSize.width = 2048;
-        moonLight.shadow.mapSize.height = 2048;
-        this.scene.add(moonLight);
+        this.sunLight = new THREE.DirectionalLight(0xfff1c1, 1.0);
+        this.sunLight.position.set(30, 60, 20);
+        this.sunLight.castShadow = true;
+        this.sunLight.shadow.mapSize.width = 2048;
+        this.sunLight.shadow.mapSize.height = 2048;
+        this.scene.add(this.sunLight);
+
+        this.moonLight = new THREE.DirectionalLight(0xa0a0c0, 0.6);
+        this.moonLight.position.set(-30, 50, -20);
+        this.moonLight.castShadow = true;
+        this.moonLight.shadow.mapSize.width = 2048;
+        this.moonLight.shadow.mapSize.height = 2048;
+        this.scene.add(this.moonLight);
 
         window.addEventListener('resize', this.onWindowResize.bind(this), false);
     }
@@ -143,18 +159,18 @@ export class BasicWorld {
         const groundUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/terrain/grasslight-big.jpg';
         this.groundTexture = this.textureLoader.load(groundUrl);
         this.groundTexture.wrapS = this.groundTexture.wrapT = THREE.RepeatWrapping;
-        this.groundTexture.repeat.set(50, 50);
+        this.groundTexture.repeat.set(100, 100);
 
-        const brickUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/brick_diffuse.jpg';
+        const brickUrl = 'https://images.unsplash.com/photo-1502672260266-1c1ef2d93688?w=1024';
         this.buildingTexture = this.textureLoader.load(brickUrl);
         this.buildingTexture.wrapS = this.buildingTexture.wrapT = THREE.RepeatWrapping;
 
-        const streetUrl = 'https://raw.githubusercontent.com/mrdoob/three.js/r177/examples/textures/floors/FloorsCheckerboard_S_Diffuse.jpg';
+        const streetUrl = 'https://images.unsplash.com/photo-1506748686214-e9df14d4d9d0?w=1024';
         this.streetTexture = this.textureLoader.load(streetUrl);
         this.streetTexture.wrapS = this.streetTexture.wrapT = THREE.RepeatWrapping;
         this.streetTexture.repeat.set(2, 2);
 
-        this.environmentMap = this.cubeTextureLoader.load([
+        this.dayEnvironmentMap = this.cubeTextureLoader.load([
             'https://threejs.org/examples/textures/cube/Bridge2/posx.jpg',
             'https://threejs.org/examples/textures/cube/Bridge2/negx.jpg',
             'https://threejs.org/examples/textures/cube/Bridge2/posy.jpg',
@@ -162,6 +178,15 @@ export class BasicWorld {
             'https://threejs.org/examples/textures/cube/Bridge2/posz.jpg',
             'https://threejs.org/examples/textures/cube/Bridge2/negz.jpg'
         ]);
+        this.nightEnvironmentMap = this.cubeTextureLoader.load([
+            'https://threejs.org/examples/textures/cube/Park2/posx.jpg',
+            'https://threejs.org/examples/textures/cube/Park2/negx.jpg',
+            'https://threejs.org/examples/textures/cube/Park2/posy.jpg',
+            'https://threejs.org/examples/textures/cube/Park2/negy.jpg',
+            'https://threejs.org/examples/textures/cube/Park2/posz.jpg',
+            'https://threejs.org/examples/textures/cube/Park2/negz.jpg'
+        ]);
+        this.environmentMap = this.dayEnvironmentMap;
         this.scene.environment = this.environmentMap;
         this.scene.background = this.environmentMap;
     }
@@ -275,8 +300,45 @@ export class BasicWorld {
         this.scene.add(lanternGroup);
     }
 
+    private addWindows(building: THREE.Mesh, width: number, height: number, depth: number): void {
+        const windowMat = new THREE.MeshStandardMaterial({
+            color: 0xffffff,
+            envMap: this.environmentMap,
+            metalness: 0.9,
+            roughness: 0.05
+        });
+        const windowGeo = new THREE.PlaneGeometry(1.2, 1.2);
+        const floors = Math.floor(height / 3);
+        const colsW = Math.floor(width / 3);
+        const colsD = Math.floor(depth / 3);
+        for (let y = 0; y < floors; y++) {
+            const yPos = -height / 2 + 1.5 + y * 3;
+            for (let x = 0; x < colsW; x++) {
+                const xPos = -width / 2 + 1.5 + x * 3;
+                const front = new THREE.Mesh(windowGeo, windowMat);
+                front.position.set(xPos, yPos, depth / 2 + 0.01);
+                building.add(front);
+                const back = new THREE.Mesh(windowGeo, windowMat);
+                back.position.set(xPos, yPos, -depth / 2 - 0.01);
+                back.rotation.y = Math.PI;
+                building.add(back);
+            }
+            for (let z = 0; z < colsD; z++) {
+                const zPos = -depth / 2 + 1.5 + z * 3;
+                const right = new THREE.Mesh(windowGeo, windowMat);
+                right.position.set(width / 2 + 0.01, yPos, zPos);
+                right.rotation.y = -Math.PI / 2;
+                building.add(right);
+                const left = new THREE.Mesh(windowGeo, windowMat);
+                left.position.set(-width / 2 - 0.01, yPos, zPos);
+                left.rotation.y = Math.PI / 2;
+                building.add(left);
+            }
+        }
+    }
+
     private createObjects(): void {
-        const groundGeometry = new THREE.PlaneGeometry(300, 300);
+        const groundGeometry = new THREE.PlaneGeometry(600, 600);
         const groundMaterial = new THREE.MeshStandardMaterial({ map: this.groundTexture, side: THREE.DoubleSide });
         const ground = new THREE.Mesh(groundGeometry, groundMaterial);
         ground.rotation.x = -Math.PI / 2;
@@ -344,6 +406,7 @@ export class BasicWorld {
                     building.position.set(buildingX, height / 2, buildingZ);
                     building.castShadow = true;
                     building.receiveShadow = true;
+                    this.addWindows(building, width, height, depth);
                     const collider = new THREE.Box3().set(
                         new THREE.Vector3(buildingX - width/2, 0, buildingZ - depth/2),
                         new THREE.Vector3(buildingX + width/2, height, buildingZ + depth/2)
@@ -433,6 +496,7 @@ export class BasicWorld {
     }
 
     private updateGameLogic(deltaTime: number): void {
+        this.updateDayNight(deltaTime);
         if (this.isInCar) {
             this.updateCarMovement(deltaTime);
         } else {
@@ -593,6 +657,24 @@ export class BasicWorld {
                 b.min.z += offsetZ; b.max.z += offsetZ;
             });
         }
+    }
+
+    private updateDayNight(deltaTime: number): void {
+        this.dayTimer = (this.dayTimer + deltaTime) % (this.dayDuration + this.nightDuration);
+        const isDay = this.dayTimer < this.dayDuration;
+        if (isDay) {
+            this.environmentMap = this.dayEnvironmentMap;
+            this.sunLight.intensity = 1.0;
+            this.moonLight.intensity = 0.0;
+            this.ambientLight.intensity = 0.8;
+        } else {
+            this.environmentMap = this.nightEnvironmentMap;
+            this.sunLight.intensity = 0.0;
+            this.moonLight.intensity = 0.6;
+            this.ambientLight.intensity = 0.3;
+        }
+        this.scene.environment = this.environmentMap;
+        this.scene.background = this.environmentMap;
     }
 
     private animate(): void {
